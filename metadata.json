@@ -1,0 +1,6 @@
+{
+  "name": "Hassan Scholars Public School - Zafarwal",
+  "description": "Official portal for Hassan Scholars Public School in Zafarwal, Pakistan. Providing high quality education from early childhood to secondary matriculation with modern facilities, character building, and academic excellence.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
