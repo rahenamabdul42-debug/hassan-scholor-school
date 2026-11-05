@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Send, CheckCircle, AlertCircle, Printer, Download, Search, 
-  Copy, Database, Key, ExternalLink, RefreshCw, User, Phone, MapPin, GraduationCap, Check
+  Send, CheckCircle, AlertCircle, Printer, Download, 
+  Copy, Database, Key, RefreshCw, User, Phone, MapPin, GraduationCap, Check, Settings2
 } from 'lucide-react';
 import { SCHOOL_DETAILS, AdmissionApplication, INITIAL_ADMISSIONS_DATA } from '../data/schoolData';
 import { 
@@ -20,15 +20,15 @@ interface AdmissionSectionProps {
 }
 
 export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedClass }) => {
-  // Exactly 5 form fields as requested:
-  // 1. Student Full Name
-  // 2. Father's Name
-  // 3. Class Applying For
-  // 4. Parent Phone Number
-  // 5. Home Address
+  // 5 Form Fields requested by user:
+  // 1. Student Name
+  // 2. Father Name
+  // 3. Class
+  // 4. Phone Number
+  // 5. Address
   const [studentName, setStudentName] = useState('');
   const [fatherName, setFatherName] = useState('');
-  const [grade, setGrade] = useState('Playgroup');
+  const [selectedClass, setSelectedClass] = useState('Playgroup');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
 
@@ -37,16 +37,17 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submittedSlip, setSubmittedSlip] = useState<AdmissionApplication | null>(null);
 
-  // Status message for Supabase (Must show "Saved in Supabase Successfully" or "Not saved yet in Supabase")
-  const [supabaseStatus, setSupabaseStatus] = useState<SupabaseSaveResult | null>(null);
+  // Status feedback (Success or Error message)
+  const [submissionResult, setSubmissionResult] = useState<SupabaseSaveResult | null>(null);
 
-  // Supabase Settings & SQL Prompt Modal/Drawer
-  const [showSupabaseModal, setShowSupabaseModal] = useState(false);
+  // Supabase Connection Settings
   const [supabaseUrl, setSupabaseUrl] = useState(() => getSupabaseConfig().url);
   const [supabaseAnonKey, setSupabaseAnonKey] = useState(() => getSupabaseConfig().anonKey);
+  const [showConfigPanel, setShowConfigPanel] = useState(() => !getSupabaseConfig().url || !getSupabaseConfig().anonKey);
+  const [showSqlModal, setShowSqlModal] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
-  const [testConnStatus, setTestConnStatus] = useState<string | null>(null);
-  const [isTestingConn, setIsTestingConn] = useState(false);
+  const [testStatus, setTestStatus] = useState<string | null>(null);
+  const [isTesting, setIsTesting] = useState(false);
 
   // Local storage backup for records
   const [applications, setApplications] = useState<AdmissionApplication[]>(() => {
@@ -61,10 +62,10 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
 
   const [activeTab, setActiveTab] = useState<'form' | 'records'>('form');
 
-  // Sync preselected class if passed from Academics
+  // Sync preselected class if passed from Academics section
   useEffect(() => {
     if (preselectedClass) {
-      setGrade(preselectedClass);
+      setSelectedClass(preselectedClass);
     }
   }, [preselectedClass]);
 
@@ -79,13 +80,13 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
-    if (!studentName.trim()) newErrors.studentName = 'Student full name is required';
-    if (!fatherName.trim()) newErrors.fatherName = "Father's name is required";
-    if (!grade.trim()) newErrors.grade = 'Please select class applying for';
+    if (!studentName.trim()) newErrors.studentName = 'Student Name is required';
+    if (!fatherName.trim()) newErrors.fatherName = "Father Name is required";
+    if (!selectedClass.trim()) newErrors.selectedClass = 'Please select a Class';
     if (!phone.trim() || phone.length < 10) {
-      newErrors.phone = 'Valid parent phone number is required (min 10 digits)';
+      newErrors.phone = 'Valid Phone Number is required (min 10 digits)';
     }
-    if (!address.trim()) newErrors.address = 'Home address in/around Zafarwal is required';
+    if (!address.trim()) newErrors.address = 'Address is required';
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -96,20 +97,20 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
     if (!validate()) return;
 
     setIsSubmitting(true);
-    setSupabaseStatus(null);
+    setSubmissionResult(null);
 
-    // 1. Attempt save to Supabase
-    const supabaseResult = await saveAdmissionRecord({
+    // Save to Supabase admissions table
+    const result = await saveAdmissionRecord({
       student_name: studentName.trim(),
       father_name: fatherName.trim(),
-      grade: grade.trim(),
+      grade: selectedClass.trim(),
       phone: phone.trim(),
       address: address.trim(),
     });
 
-    setSupabaseStatus(supabaseResult);
+    setSubmissionResult(result);
 
-    // 2. Create structured record for local slip generation
+    // Generate local slip and tracking record
     const trackingId = `HSPS-2026-${Math.floor(1000 + Math.random() * 9000)}`;
     const newRecord: AdmissionApplication = {
       id: `adm-${Date.now()}`,
@@ -117,47 +118,43 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
       submissionDate: new Date().toISOString().split('T')[0],
       studentName: studentName.trim(),
       fatherName: fatherName.trim(),
-      grade: grade.trim(),
+      grade: selectedClass.trim(),
       parentPhone: phone.trim(),
       address: address.trim(),
       dob: 'As per B-Form',
       gender: 'Registered',
       previousSchool: 'As recorded',
-      status: supabaseResult.isSavedInSupabase ? 'Admission Offered' : 'Received',
+      status: result.isSavedInSupabase ? 'Admission Offered' : 'Received',
     };
 
     setApplications((prev) => [newRecord, ...prev]);
-    setSubmittedSlip(newRecord);
+
+    if (result.isSavedInSupabase) {
+      setSubmittedSlip(newRecord);
+      // Reset form fields only on success
+      setStudentName('');
+      setFatherName('');
+      setPhone('');
+      setAddress('');
+    }
+
     setIsSubmitting(false);
-
-    // Reset 5 form fields
-    setStudentName('');
-    setFatherName('');
-    setPhone('');
-    setAddress('');
   };
 
-  const handleCopySql = () => {
-    navigator.clipboard.writeText(SUPABASE_SQL_SCRIPT);
-    setCopiedSql(true);
-    setTimeout(() => setCopiedSql(false), 3000);
-  };
-
-  const handleSaveConfig = () => {
+  const handleSaveCredentials = () => {
     saveSupabaseConfig(supabaseUrl, supabaseAnonKey);
     handleTestConnection();
   };
 
   const handleTestConnection = async () => {
-    setIsTestingConn(true);
-    setTestConnStatus(null);
-
+    setIsTesting(true);
+    setTestStatus(null);
     saveSupabaseConfig(supabaseUrl, supabaseAnonKey);
-    const client = getSupabaseClient();
 
+    const client = getSupabaseClient();
     if (!client) {
-      setTestConnStatus('Error: Supabase URL or Anon Key is missing.');
-      setIsTestingConn(false);
+      setTestStatus('Error: Please enter both Supabase Project URL and Publishable Key.');
+      setIsTesting(false);
       return;
     }
 
@@ -165,18 +162,25 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
       const { error } = await client.from('admissions').select('id').limit(1);
       if (error) {
         if (error.code === '42P01') {
-          setTestConnStatus('Connected to Supabase, but "admissions" table does not exist yet. Please paste the SQL prompt in Supabase SQL editor.');
+          setTestStatus('Connected to Supabase, but "admissions" table was not found. Please click "View Table SQL" to create it.');
         } else {
-          setTestConnStatus(`Supabase response: ${error.message}`);
+          setTestStatus(`Supabase message: ${error.message}`);
         }
       } else {
-        setTestConnStatus('Connection Successful! Supabase "admissions" table is ready and connected.');
+        setTestStatus('Success: Connected to your Supabase "admissions" table!');
+        setShowConfigPanel(false);
       }
     } catch (err: any) {
-      setTestConnStatus(`Connection failed: ${err?.message || 'Check network or credentials'}`);
+      setTestStatus(`Connection error: ${err?.message || 'Unable to connect'}`);
     } finally {
-      setIsTestingConn(false);
+      setIsTesting(false);
     }
+  };
+
+  const handleCopySql = () => {
+    navigator.clipboard.writeText(SUPABASE_SQL_SCRIPT);
+    setCopiedSql(true);
+    setTimeout(() => setCopiedSql(false), 3000);
   };
 
   const isConnected = !!(getSupabaseConfig().url && getSupabaseConfig().anonKey);
@@ -188,52 +192,130 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
         {/* Section Header */}
         <div className="text-center max-w-3xl mx-auto space-y-3 mb-10">
           <p className="text-xs sm:text-sm font-semibold uppercase tracking-widest text-amber-700 font-crest">
-            Official Admission System
+            Hassan Scholars Public School · Zafarwal
           </p>
           <h2 className="text-3xl sm:text-4xl font-bold font-serif-school text-blue-950 tracking-tight">
-            Online Admission Application Form
+            Online Admission Form
           </h2>
           <div className="w-16 h-1 bg-amber-500 mx-auto rounded-full" />
           <p className="text-base text-slate-600 leading-relaxed pt-2">
-            Apply online with 5 essential details. Submissions are synced with our Supabase database and issue an official registration slip for campus verification in Zafarwal.
+            Fill in the 5 fields below to submit an admission application. Submissions are saved directly into your Supabase <code className="px-1.5 py-0.5 bg-slate-200 text-blue-950 rounded text-xs font-mono font-bold">admissions</code> table.
           </p>
         </div>
 
-        {/* Supabase Status Banner & Action Button */}
-        <div className="max-w-3xl mx-auto mb-8 flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-white rounded-2xl border border-slate-200 shadow-xs">
-          <div className="flex items-center gap-3 text-xs sm:text-sm">
-            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-              isConnected ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-            }`}>
-              <Database className="w-4 h-4" />
+        {/* Supabase Connection Status Ribbon */}
+        <div className="max-w-3xl mx-auto mb-8 bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-3 text-xs sm:text-sm">
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                isConnected ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+              }`}>
+                <Database className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-slate-900">Database Connection:</span>
+                  <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                    isConnected ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-600' : 'bg-amber-600'}`} />
+                    {isConnected ? 'Connected to admissions table' : 'Credentials Not Configured'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {isConnected 
+                    ? `Using URL: ${getSupabaseConfig().url.slice(0, 30)}...`
+                    : 'Provide your existing Supabase Project URL & Publishable Key below.'}
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="font-bold text-slate-900 flex items-center gap-2">
-                <span>Supabase Database Status:</span>
-                <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-                  isConnected ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                }`}>
-                  {isConnected ? 'Connected' : 'Not Connected Yet'}
-                </span>
-              </p>
-              <p className="text-xs text-slate-500">
-                {isConnected
-                  ? 'Ready to save admission records directly into your Supabase table.'
-                  : 'Click "Supabase Setup & SQL" to connect your Supabase project.'}
-              </p>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => setShowConfigPanel(!showConfigPanel)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 hover:text-blue-950 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+              >
+                <Settings2 className="w-3.5 h-3.5" />
+                <span>{showConfigPanel ? 'Hide Settings' : 'Supabase Settings'}</span>
+              </button>
+              <button
+                onClick={() => setShowSqlModal(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-900 bg-amber-400 hover:bg-amber-300 rounded-lg transition-colors cursor-pointer"
+              >
+                <Database className="w-3.5 h-3.5" />
+                <span>View Table SQL</span>
+              </button>
             </div>
           </div>
 
-          <button
-            onClick={() => setShowSupabaseModal(true)}
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-bold text-blue-950 bg-amber-400 hover:bg-amber-300 rounded-xl transition-colors cursor-pointer shrink-0"
-          >
-            <Database className="w-3.5 h-3.5" />
-            <span>Supabase Setup & SQL Prompt</span>
-          </button>
+          {/* Expandable Credentials Config Form */}
+          {showConfigPanel && (
+            <div className="mt-4 pt-4 border-t border-slate-100 space-y-3">
+              <p className="text-xs font-semibold text-slate-700">
+                Connect your existing Supabase Project URL and Publishable Key:
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1">
+                    Supabase Project URL
+                  </label>
+                  <input
+                    type="text"
+                    value={supabaseUrl}
+                    onChange={(e) => setSupabaseUrl(e.target.value)}
+                    placeholder="https://xyzabcdefghijklm.supabase.co"
+                    className="w-full px-3 py-2 text-xs font-mono bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1">
+                    Publishable Key / Anon Key
+                  </label>
+                  <input
+                    type="password"
+                    value={supabaseAnonKey}
+                    onChange={(e) => setSupabaseAnonKey(e.target.value)}
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    className="w-full px-3 py-2 text-xs font-mono bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+              </div>
+
+              {testStatus && (
+                <div className={`p-2.5 rounded-lg text-xs font-medium ${
+                  testStatus.startsWith('Success')
+                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-300'
+                    : 'bg-amber-50 text-amber-800 border border-amber-300'
+                }`}>
+                  {testStatus}
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleSaveCredentials}
+                  className="px-4 py-2 bg-blue-950 hover:bg-blue-900 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                >
+                  Save Credentials
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTestConnection}
+                  disabled={isTesting}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {isTesting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Database className="w-3.5 h-3.5" />}
+                  <span>Test Connection</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Tab switch between 5-field Form and Local Record Ledger */}
+        {/* Tab switch between Form and Records */}
         <div className="flex justify-center mb-8">
           <div className="inline-flex p-1 bg-white border border-slate-200 rounded-xl shadow-xs">
             <button
@@ -254,7 +336,7 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
                   : 'text-slate-600 hover:text-blue-950'
               }`}
             >
-              Submitted Records ({applications.length})
+              View Admissions ({applications.length})
             </button>
           </div>
         </div>
@@ -263,36 +345,39 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
         {activeTab === 'form' && (
           <div className="max-w-3xl mx-auto">
             
-            {/* Supabase Status Message Display (Always shown whenever submitted) */}
-            {supabaseStatus && (
+            {/* Submission Status Message (Success or Error) */}
+            {submissionResult && (
               <div className={`mb-6 p-5 rounded-2xl border transition-all ${
-                supabaseStatus.isSavedInSupabase
+                submissionResult.isSavedInSupabase
                   ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
-                  : 'bg-amber-50 border-amber-300 text-amber-900'
+                  : 'bg-rose-50 border-rose-300 text-rose-900'
               }`}>
                 <div className="flex items-start gap-3">
-                  {supabaseStatus.isSavedInSupabase ? (
+                  {submissionResult.isSavedInSupabase ? (
                     <CheckCircle className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
                   ) : (
-                    <AlertCircle className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
+                    <AlertCircle className="w-6 h-6 text-rose-600 shrink-0 mt-0.5" />
                   )}
                   <div className="flex-1 space-y-1">
                     <h4 className="font-bold text-base tracking-tight">
-                      {supabaseStatus.message}
+                      {submissionResult.isSavedInSupabase
+                        ? 'Admission Application Submitted and Saved in Supabase Successfully!'
+                        : 'Submission Failed to Save in Supabase'}
                     </h4>
-                    {supabaseStatus.details && (
-                      <p className="text-xs opacity-90 leading-relaxed">
-                        {supabaseStatus.details}
-                      </p>
-                    )}
-                    {!supabaseStatus.isSavedInSupabase && (
+                    <p className="text-xs opacity-90 leading-relaxed">
+                      {submissionResult.details || (submissionResult.isSavedInSupabase 
+                        ? 'Record successfully stored in your Supabase admissions table.' 
+                        : 'Please check your Supabase Project URL and Publishable Key.')}
+                    </p>
+                    {!submissionResult.isSavedInSupabase && (
                       <div className="pt-2">
                         <button
-                          onClick={() => setShowSupabaseModal(true)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-950 bg-amber-300 hover:bg-amber-200 rounded-lg transition-colors cursor-pointer"
+                          type="button"
+                          onClick={() => setShowConfigPanel(true)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-rose-950 bg-rose-200 hover:bg-rose-300 rounded-lg transition-colors cursor-pointer"
                         >
                           <Key className="w-3.5 h-3.5" />
-                          <span>Configure Supabase Keys & SQL Table</span>
+                          <span>Check Supabase URL & Key</span>
                         </button>
                       </div>
                     )}
@@ -301,7 +386,7 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
               </div>
             )}
 
-            {/* Generated Registration Slip (If submitted) */}
+            {/* If submission succeeded, show official slip */}
             {submittedSlip ? (
               <div id="printable-admission-slip" className="bg-white rounded-2xl border-2 border-amber-400 p-6 sm:p-8 shadow-lg space-y-6">
                 <div className="flex flex-col sm:flex-row items-center justify-between border-b border-slate-200 pb-5 gap-4">
@@ -314,14 +399,14 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
                         {SCHOOL_DETAILS.name}
                       </h3>
                       <p className="text-xs text-slate-500">
-                        Zafarwal, Punjab, Pakistan · Admission Registration Slip
+                        Zafarwal, Punjab, Pakistan · Official Admission Registration Slip
                       </p>
                     </div>
                   </div>
 
                   <div className="text-center sm:text-right">
-                    <span className="inline-block bg-blue-50 text-blue-900 border border-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-lg">
-                      Tracking ID: {submittedSlip.trackingId}
+                    <span className="inline-block bg-emerald-50 text-emerald-800 border border-emerald-300 text-xs font-mono font-bold px-3 py-1 rounded-lg">
+                      Saved in Supabase: {submittedSlip.trackingId}
                     </span>
                     <p className="text-xs text-slate-500 mt-1">Date: {submittedSlip.submissionDate}</p>
                   </div>
@@ -330,23 +415,23 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
                 {/* 5 Submitted Fields Summary */}
                 <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                   <div>
-                    <span className="text-xs text-slate-400 uppercase font-semibold">1. Student Full Name</span>
+                    <span className="text-xs text-slate-400 uppercase font-semibold">1. Student Name</span>
                     <p className="font-bold text-slate-900 mt-0.5">{submittedSlip.studentName}</p>
                   </div>
                   <div>
-                    <span className="text-xs text-slate-400 uppercase font-semibold">2. Father's Name</span>
+                    <span className="text-xs text-slate-400 uppercase font-semibold">2. Father Name</span>
                     <p className="font-bold text-slate-900 mt-0.5">{submittedSlip.fatherName}</p>
                   </div>
                   <div>
-                    <span className="text-xs text-slate-400 uppercase font-semibold">3. Class Applying For</span>
+                    <span className="text-xs text-slate-400 uppercase font-semibold">3. Class</span>
                     <p className="font-bold text-amber-800 mt-0.5">{submittedSlip.grade}</p>
                   </div>
                   <div>
-                    <span className="text-xs text-slate-400 uppercase font-semibold">4. Parent Phone Number</span>
+                    <span className="text-xs text-slate-400 uppercase font-semibold">4. Phone Number</span>
                     <p className="font-mono font-medium text-slate-900 mt-0.5">{submittedSlip.parentPhone}</p>
                   </div>
                   <div className="sm:col-span-2">
-                    <span className="text-xs text-slate-400 uppercase font-semibold">5. Home Address</span>
+                    <span className="text-xs text-slate-400 uppercase font-semibold">5. Address</span>
                     <p className="font-medium text-slate-900 mt-0.5">{submittedSlip.address}</p>
                   </div>
                 </div>
@@ -367,7 +452,7 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
                       className="inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold text-blue-950 bg-amber-400 hover:bg-amber-300 rounded-lg transition-colors cursor-pointer"
                     >
                       <Printer className="w-4 h-4" />
-                      <span>Print Admission Slip</span>
+                      <span>Print Slip</span>
                     </button>
                     <button
                       onClick={() => {
@@ -388,11 +473,11 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
                   <button
                     onClick={() => {
                       setSubmittedSlip(null);
-                      setSupabaseStatus(null);
+                      setSubmissionResult(null);
                     }}
                     className="text-xs font-semibold text-blue-950 hover:underline cursor-pointer"
                   >
-                    + Submit Another Form
+                    + Submit Another Admission
                   </button>
                 </div>
               </div>
@@ -402,22 +487,22 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
                 <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
                   <div>
                     <h3 className="text-xl font-bold font-serif-school text-blue-950">
-                      Admission Form (5 Essential Fields)
+                      Admission Application
                     </h3>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Enter the 5 required details to register for Session 2026–2027.
+                      Please enter the 5 details below. Connected to your Supabase admissions table.
                     </p>
                   </div>
                   <span className="text-xs font-semibold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-md border border-amber-200">
-                    5 Fields Only
+                    Session 2026–27
                   </span>
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-5">
-                  {/* Field 1: Student Full Name */}
+                  {/* Field 1: Student Name */}
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-wider text-slate-800 mb-1.5">
-                      1. Student Full Name <span className="text-rose-500">*</span>
+                      1. Student Name <span className="text-rose-500">*</span>
                     </label>
                     <div className="relative">
                       <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
@@ -438,10 +523,10 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
                     )}
                   </div>
 
-                  {/* Field 2: Father's Name */}
+                  {/* Field 2: Father Name */}
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-wider text-slate-800 mb-1.5">
-                      2. Father's Name <span className="text-rose-500">*</span>
+                      2. Father Name <span className="text-rose-500">*</span>
                     </label>
                     <div className="relative">
                       <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
@@ -462,22 +547,22 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
                     )}
                   </div>
 
-                  {/* Field 3: Class Applying For */}
+                  {/* Field 3: Class */}
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-wider text-slate-800 mb-1.5">
-                      3. Class Applying For <span className="text-rose-500">*</span>
+                      3. Class <span className="text-rose-500">*</span>
                     </label>
                     <div className="relative">
                       <GraduationCap className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
                       <select
-                        value={grade}
-                        onChange={(e) => setGrade(e.target.value)}
+                        value={selectedClass}
+                        onChange={(e) => setSelectedClass(e.target.value)}
                         className="w-full pl-10 pr-4 py-2.5 text-sm bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:border-blue-900 focus:outline-none font-medium text-slate-900"
                       >
-                        <optgroup label="Early Childhood">
-                          <option value="Playgroup">Playgroup</option>
-                          <option value="Nursery">Nursery</option>
-                          <option value="Kindergarten (Prep)">Kindergarten (Prep)</option>
+                        <optgroup label="Early Childhood Education">
+                          <option value="Playgroup">Playgroup (Age 2.5–3.5 yrs)</option>
+                          <option value="Nursery">Nursery (Age 3.5–4.5 yrs)</option>
+                          <option value="Kindergarten (Prep)">Kindergarten (Prep) (Age 4.5–5.5 yrs)</option>
                         </optgroup>
                         <optgroup label="Primary Wing">
                           <option value="Grade 1">Grade 1</option>
@@ -491,7 +576,7 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
                           <option value="Grade 7">Grade 7</option>
                           <option value="Grade 8">Grade 8</option>
                         </optgroup>
-                        <optgroup label="Secondary (Matriculation)">
+                        <optgroup label="Secondary Wing (BISE Matriculation)">
                           <option value="Grade 9 (Science - Biology)">Grade 9 (Science - Biology)</option>
                           <option value="Grade 9 (Science - Computer)">Grade 9 (Science - Computer)</option>
                           <option value="Grade 10 (Science - Biology)">Grade 10 (Science - Biology)</option>
@@ -501,10 +586,10 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
                     </div>
                   </div>
 
-                  {/* Field 4: Parent Phone Number */}
+                  {/* Field 4: Phone Number */}
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-wider text-slate-800 mb-1.5">
-                      4. Parent Phone Number / WhatsApp <span className="text-rose-500">*</span>
+                      4. Phone Number <span className="text-rose-500">*</span>
                     </label>
                     <div className="relative">
                       <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
@@ -525,10 +610,10 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
                     )}
                   </div>
 
-                  {/* Field 5: Home Address */}
+                  {/* Field 5: Address */}
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-wider text-slate-800 mb-1.5">
-                      5. Home Address (Zafarwal & Surrounding Areas) <span className="text-rose-500">*</span>
+                      5. Address <span className="text-rose-500">*</span>
                     </label>
                     <div className="relative">
                       <MapPin className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
@@ -536,7 +621,7 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
                         type="text"
                         value={address}
                         onChange={(e) => setAddress(e.target.value)}
-                        placeholder="House / Street / Mohallah in Zafarwal"
+                        placeholder="House / Street / Mohallah in Zafarwal, Punjab"
                         className={`w-full pl-10 pr-4 py-2.5 text-sm bg-slate-50 border rounded-xl focus:bg-white focus:outline-none transition-colors ${
                           errors.address ? 'border-rose-400' : 'border-slate-300 focus:border-blue-900'
                         }`}
@@ -552,7 +637,7 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
                   {/* Submit Button */}
                   <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
                     <p className="text-xs text-slate-500">
-                      Saves directly to Supabase and generates registration slip.
+                      Submissions are saved directly in the Supabase <span className="font-mono font-semibold text-blue-950">admissions</span> table.
                     </p>
 
                     <button
@@ -563,7 +648,7 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
                       {isSubmitting ? (
                         <>
                           <RefreshCw className="w-4 h-4 animate-spin" />
-                          <span>Saving Data...</span>
+                          <span>Saving to Supabase...</span>
                         </>
                       ) : (
                         <>
@@ -585,10 +670,10 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
               <div>
                 <h3 className="text-xl font-bold font-serif-school text-blue-950">
-                  Admission Records (5 Fields)
+                  Admission Form Submissions
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  View recent admissions submitted through this 5-field form.
+                  Saved records with all 5 fields.
                 </p>
               </div>
 
@@ -614,8 +699,8 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
                     <th className="py-3 px-3">Tracking ID</th>
                     <th className="py-3 px-3">Student Name</th>
                     <th className="py-3 px-3">Father Name</th>
-                    <th className="py-3 px-3">Grade</th>
-                    <th className="py-3 px-3">Phone</th>
+                    <th className="py-3 px-3">Class</th>
+                    <th className="py-3 px-3">Phone Number</th>
                     <th className="py-3 px-3">Address</th>
                   </tr>
                 </thead>
@@ -636,14 +721,14 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
           </div>
         )}
 
-        {/* SUPABASE SETUP & SQL PROMPT MODAL */}
-        {showSupabaseModal && (
+        {/* SUPABASE SQL SCRIPT MODAL */}
+        {showSqlModal && (
           <div 
             className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4"
-            onClick={() => setShowSupabaseModal(false)}
+            onClick={() => setShowSqlModal(false)}
           >
             <div 
-              className="relative max-w-3xl w-full bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden max-h-[85vh] flex flex-col"
+              className="relative max-w-2xl w-full bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden max-h-[85vh] flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Modal Header */}
@@ -654,16 +739,16 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
                   </div>
                   <div>
                     <h3 className="font-crest text-lg font-bold">
-                      Supabase Integration & Table SQL
+                      Supabase "admissions" Table SQL
                     </h3>
                     <p className="text-xs text-amber-300">
-                      Copy SQL prompt and connect your Supabase credentials
+                      Table schema matching your 5 fields
                     </p>
                   </div>
                 </div>
 
                 <button
-                  onClick={() => setShowSupabaseModal(false)}
+                  onClick={() => setShowSqlModal(false)}
                   className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center cursor-pointer transition-colors"
                 >
                   ✕
@@ -671,104 +756,29 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
               </div>
 
               {/* Modal Body */}
-              <div className="p-6 sm:p-8 space-y-6 overflow-y-auto text-sm text-slate-700">
-                
-                {/* Step 1: SQL Prompt */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-blue-950 flex items-center gap-1.5">
-                      <span>Step 1: Paste this SQL in Supabase SQL Editor</span>
-                    </h4>
-                    <button
-                      onClick={handleCopySql}
-                      className="inline-flex items-center gap-1 px-3 py-1 bg-amber-400 hover:bg-amber-300 text-blue-950 rounded-lg text-xs font-bold transition-colors cursor-pointer"
-                    >
-                      {copiedSql ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedSql ? 'Copied to Clipboard!' : 'Copy SQL Prompt'}</span>
-                    </button>
-                  </div>
-
+              <div className="p-6 space-y-4 overflow-y-auto text-sm text-slate-700">
+                <div className="flex items-center justify-between">
                   <p className="text-xs text-slate-500">
-                    Open your Supabase dashboard &rarr; <strong>SQL Editor</strong> &rarr; Click <strong>New query</strong> &rarr; Paste and click <strong>Run</strong>:
+                    Run this query in your Supabase SQL Editor if your table is not created yet:
                   </p>
-
-                  <div className="bg-slate-900 text-slate-100 p-4 rounded-xl font-mono text-xs overflow-x-auto border border-slate-800">
-                    <pre>{SUPABASE_SQL_SCRIPT}</pre>
-                  </div>
+                  <button
+                    onClick={handleCopySql}
+                    className="inline-flex items-center gap-1 px-3 py-1 bg-amber-400 hover:bg-amber-300 text-blue-950 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    {copiedSql ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedSql ? 'Copied!' : 'Copy SQL'}</span>
+                  </button>
                 </div>
 
-                {/* Step 2: Supabase Credentials */}
-                <div className="space-y-4 pt-3 border-t border-slate-200">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-blue-950">
-                    Step 2: Enter Supabase Project URL & Anon Key
-                  </h4>
-                  <p className="text-xs text-slate-500">
-                    Found in your Supabase Dashboard under <strong>Project Settings &rarr; API</strong>.
-                  </p>
-
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Project URL:
-                      </label>
-                      <input
-                        type="text"
-                        value={supabaseUrl}
-                        onChange={(e) => setSupabaseUrl(e.target.value)}
-                        placeholder="https://xyzabcdefghijklm.supabase.co"
-                        className="w-full px-3.5 py-2 text-xs font-mono bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-blue-900"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Project Public Anon Key:
-                      </label>
-                      <input
-                        type="password"
-                        value={supabaseAnonKey}
-                        onChange={(e) => setSupabaseAnonKey(e.target.value)}
-                        placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                        className="w-full px-3.5 py-2 text-xs font-mono bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-blue-900"
-                      />
-                    </div>
-                  </div>
-
-                  {testConnStatus && (
-                    <div className={`p-3 rounded-lg text-xs ${
-                      testConnStatus.includes('Successful')
-                        ? 'bg-emerald-50 text-emerald-800 border border-emerald-300 font-semibold'
-                        : 'bg-amber-50 text-amber-800 border border-amber-300'
-                    }`}>
-                      {testConnStatus}
-                    </div>
-                  )}
-
-                  <div className="flex flex-wrap items-center gap-3 pt-2">
-                    <button
-                      onClick={handleSaveConfig}
-                      className="px-4 py-2 bg-blue-950 hover:bg-blue-900 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
-                    >
-                      Save Configuration
-                    </button>
-                    <button
-                      onClick={handleTestConnection}
-                      disabled={isTestingConn}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-lg transition-colors cursor-pointer disabled:opacity-50"
-                    >
-                      {isTestingConn ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Database className="w-3.5 h-3.5" />}
-                      <span>Test Live Connection</span>
-                    </button>
-                  </div>
+                <div className="bg-slate-900 text-slate-100 p-4 rounded-xl font-mono text-xs overflow-x-auto border border-slate-800">
+                  <pre>{SUPABASE_SQL_SCRIPT}</pre>
                 </div>
-
               </div>
 
-              {/* Modal Footer */}
               <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end shrink-0">
                 <button
-                  onClick={() => setShowSupabaseModal(false)}
-                  className="px-5 py-2 text-xs font-bold uppercase tracking-wider text-slate-700 hover:text-slate-900 bg-white border border-slate-300 rounded-lg cursor-pointer"
+                  onClick={() => setShowSqlModal(false)}
+                  className="px-5 py-2 text-xs font-bold text-slate-700 hover:text-slate-900 bg-white border border-slate-300 rounded-lg cursor-pointer"
                 >
                   Close
                 </button>
