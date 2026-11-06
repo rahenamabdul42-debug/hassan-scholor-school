@@ -4,6 +4,7 @@ import {
   Trophy, ShieldCheck, HeartHandshake, CheckCircle2, ChevronRight 
 } from 'lucide-react';
 import { SCHOOL_FACILITIES, Facility } from '../data/schoolData';
+import { SchoolImage } from './SchoolImage';
 
 const getFacilityIcon = (iconName: string) => {
   switch (iconName) {
@@ -50,12 +51,13 @@ export const FacilitiesSection: React.FC = () => {
             >
               {/* Image Container with Fallback and Aspect Ratio */}
               <div className="relative h-48 w-full overflow-hidden bg-slate-200">
-                <img
+                <SchoolImage
                   src={fac.image}
                   alt={fac.title}
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                  referrerPolicy="no-referrer"
                   loading="lazy"
+                  fallbackTitle={fac.title}
+                  fallbackCategory={fac.category}
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-blue-950/80 via-transparent to-transparent" />
                 

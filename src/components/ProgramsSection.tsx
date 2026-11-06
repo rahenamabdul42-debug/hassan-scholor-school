@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { BookOpen, Clock, Calendar, Check, ArrowRight, Sparkles, GraduationCap } from 'lucide-react';
 import { ACADEMIC_PROGRAMS, AcademicProgram } from '../data/schoolData';
+import { SchoolImage } from './SchoolImage';
 
 interface ProgramsSectionProps {
   onSelectProgramForAdmission: (programName: string) => void;
@@ -166,11 +167,12 @@ export const ProgramsSection: React.FC<ProgramsSectionProps> = ({ onSelectProgra
 
               {/* Classroom Photo Thumbnail */}
               <div className="rounded-lg overflow-hidden border border-slate-100 mt-4 relative">
-                <img
-                  src="/src/assets/images/classroom_learning_1793852516096.jpg"
+                <SchoolImage
+                  src="/images/classroom.jpg"
                   alt="Students in classroom"
                   className="w-full h-40 object-cover"
-                  referrerPolicy="no-referrer"
+                  fallbackTitle="Interactive Smart Classrooms"
+                  fallbackCategory="Academic Campus"
                 />
                 <div className="absolute bottom-2 left-2 right-2 bg-blue-950/80 backdrop-blur-xs text-white text-[11px] px-2.5 py-1 rounded">
                   Active interactive smart classroom at Zafarwal campus

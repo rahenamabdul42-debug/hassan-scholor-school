@@ -1,6 +1,7 @@
 import React from 'react';
 import { ArrowRight, Sparkles, CheckCircle2, ShieldCheck, Award, BookOpen, Compass } from 'lucide-react';
 import { SCHOOL_DETAILS } from '../data/schoolData';
+import { SchoolImage } from './SchoolImage';
 
 interface HeroProps {
   onApplyClick: () => void;
@@ -96,12 +97,13 @@ export const Hero: React.FC<HeroProps> = ({ onApplyClick, onExploreClick, onOpen
               
               {/* Main Image Container */}
               <div className="relative rounded-2xl overflow-hidden border-2 border-amber-400/30 shadow-2xl bg-blue-900/50">
-                <img
-                  src="/src/assets/images/hero_school_students_1793852515659.jpg"
+                <SchoolImage
+                  src="/images/school_hero.jpg"
                   alt="Hassan Scholars Public School Students on campus in Zafarwal, Pakistan"
                   className="w-full h-[360px] sm:h-[420px] object-cover object-top hover:scale-102 transition-transform duration-700"
-                  referrerPolicy="no-referrer"
                   loading="eager"
+                  fallbackTitle="Hassan Scholars Public School Students"
+                  fallbackCategory="Zafarwal Campus"
                 />
 
                 {/* Overlay gradient for text legibility */}

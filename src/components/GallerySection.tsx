@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, ZoomIn, Calendar, Tag, ChevronLeft, ChevronRight } from 'lucide-react';
 import { GALLERY_ITEMS, GalleryItem } from '../data/schoolData';
+import { SchoolImage } from './SchoolImage';
 
 export const GallerySection: React.FC = () => {
   const [activeCategory, setActiveCategory] = useState<string>('All');
@@ -84,12 +85,13 @@ export const GallerySection: React.FC = () => {
             >
               {/* Photo Display */}
               <div className="relative h-64 w-full overflow-hidden bg-slate-200">
-                <img
+                <SchoolImage
                   src={item.image}
                   alt={item.title}
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                  referrerPolicy="no-referrer"
                   loading="lazy"
+                  fallbackTitle={item.title}
+                  fallbackCategory={item.category}
                 />
                 <div className="absolute inset-0 bg-blue-950/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                   <div className="w-10 h-10 rounded-full bg-white/90 text-blue-950 flex items-center justify-center shadow-md">
@@ -167,11 +169,12 @@ export const GallerySection: React.FC = () => {
 
               {/* Fullscreen Photo */}
               <div className="relative max-h-[70vh] bg-black flex items-center justify-center overflow-hidden">
-                <img
+                <SchoolImage
                   src={selectedPhoto.image}
                   alt={selectedPhoto.title}
                   className="max-h-[70vh] w-auto max-w-full object-contain"
-                  referrerPolicy="no-referrer"
+                  fallbackTitle={selectedPhoto.title}
+                  fallbackCategory={selectedPhoto.category}
                 />
               </div>
 
