@@ -1,13 +1,23 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
+// Central environment variables (configured in Vercel or .env.local)
+const ENV_SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || '';
+const ENV_SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+
+// Fallback storage key for local development override
 const STORAGE_URL_KEY = 'hsps_supabase_url';
 const STORAGE_KEY_KEY = 'hsps_supabase_anon_key';
 
-export const SUPABASE_SQL_SCRIPT = `-- ==========================================
+/**
+ * Recommended Row Level Security (RLS) script for Supabase:
+ * Ensures anonymous public visitors can safely INSERT admission applications.
+ */
+export const SUPABASE_RLS_FIX_SQL = `-- ==============================================================
 -- HASSAN SCHOLARS PUBLIC SCHOOL - ZAFARWAL
--- Table for Admission Form Submissions
--- ==========================================
+-- Safe Row Level Security (RLS) for Anonymous Visitors (INSERT)
+-- ==============================================================
 
+-- 1. Ensure table exists with standard columns
 CREATE TABLE IF NOT EXISTS admissions (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   student_name TEXT NOT NULL,
@@ -18,21 +28,23 @@ CREATE TABLE IF NOT EXISTS admissions (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Enable Row Level Security (RLS)
+-- 2. Enable Row Level Security
 ALTER TABLE admissions ENABLE ROW LEVEL SECURITY;
 
--- Allow public website visitors to submit admission forms
+-- 3. Allow anonymous public visitors (the 'anon' role) to submit admission forms
 DROP POLICY IF EXISTS "Allow public insert for admissions" ON admissions;
 CREATE POLICY "Allow public insert for admissions" 
 ON admissions 
 FOR INSERT 
+TO anon, authenticated
 WITH CHECK (true);
 
--- Allow reading admissions for verification
+-- 4. Allow reading admissions (for status check or authenticated dashboard)
 DROP POLICY IF EXISTS "Allow public read admissions" ON admissions;
 CREATE POLICY "Allow public read admissions" 
 ON admissions 
 FOR SELECT 
+TO anon, authenticated
 USING (true);
 `;
 
@@ -42,40 +54,30 @@ export interface SupabaseConfig {
 }
 
 export const getSupabaseConfig = (): SupabaseConfig => {
-  const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
-  const envKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
-  const localUrl = localStorage.getItem(STORAGE_URL_KEY) || '';
-  const localKey = localStorage.getItem(STORAGE_KEY_KEY) || '';
+  const localUrl = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_URL_KEY) || '' : '';
+  const localKey = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY_KEY) || '' : '';
 
-  return {
-    url: (localUrl || envUrl || '').trim(),
-    anonKey: (localKey || envKey || '').trim(),
-  };
+  // Prioritize Vercel / Vite environment variables, fallback to local storage
+  const url = (ENV_SUPABASE_URL || localUrl || '').trim();
+  const anonKey = (ENV_SUPABASE_ANON_KEY || localKey || '').trim();
+
+  return { url, anonKey };
 };
 
-export const saveSupabaseConfig = (url: string, anonKey: string) => {
-  if (url.trim()) {
-    localStorage.setItem(STORAGE_URL_KEY, url.trim());
-  } else {
-    localStorage.removeItem(STORAGE_URL_KEY);
-  }
-
-  if (anonKey.trim()) {
-    localStorage.setItem(STORAGE_KEY_KEY, anonKey.trim());
-  } else {
-    localStorage.removeItem(STORAGE_KEY_KEY);
-  }
-
-  // Clear cached client so it re-initializes
-  cachedClient = null;
-  lastUsedUrl = '';
-  lastUsedKey = '';
+export const isSupabaseConfigured = (): boolean => {
+  const { url, anonKey } = getSupabaseConfig();
+  return Boolean(url && anonKey);
 };
 
 let cachedClient: SupabaseClient | null = null;
 let lastUsedUrl = '';
 let lastUsedKey = '';
 
+/**
+ * Automatically initializes and returns the Supabase client.
+ * Uses Vercel environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY).
+ * Never exposes or uses the service_role key.
+ */
 export const getSupabaseClient = (): SupabaseClient | null => {
   const { url, anonKey } = getSupabaseConfig();
   if (!url || !anonKey) {
@@ -87,7 +89,12 @@ export const getSupabaseClient = (): SupabaseClient | null => {
   }
 
   try {
-    cachedClient = createClient(url, anonKey);
+    cachedClient = createClient(url, anonKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
     lastUsedUrl = url;
     lastUsedKey = anonKey;
     return cachedClient;
@@ -96,6 +103,9 @@ export const getSupabaseClient = (): SupabaseClient | null => {
     return null;
   }
 };
+
+// Automatically initialize on module load
+export const supabase = getSupabaseClient();
 
 export interface AdmissionPayload {
   student_name: string;
@@ -113,12 +123,10 @@ export interface SupabaseSaveResult {
 }
 
 /**
- * Robust insertion helper that supports both common Supabase column naming conventions:
- * - { student_name, father_name, class, phone_number, address }
- * - { student_name, father_name, grade, phone, address }
- * - { student_name, father_name, class, phone, address }
- * - { student_name, father_name, grade, phone_number, address }
- * - { "Student Name", "Father Name", "Class", "Phone Number", "Address" }
+ * Inserts admission record into Supabase `admissions` table.
+ * Designed specifically for anonymous visitors:
+ * - Does not chain .select() during insert to prevent RLS read permission blocks.
+ * - Supports automatic column fallbacks (class vs grade, phone_number vs phone).
  */
 export const saveAdmissionRecord = async (
   payload: AdmissionPayload
@@ -128,14 +136,14 @@ export const saveAdmissionRecord = async (
   if (!client) {
     return {
       isSavedInSupabase: false,
-      message: 'Supabase credentials missing',
-      details: 'Please provide your existing Supabase Project URL and Publishable Key in the form settings.',
+      message: 'Supabase configuration pending in Vercel',
+      details: 'VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY environment variables are required in Vercel project settings.',
     };
   }
 
-  // Variation attempts in case user table uses `class` vs `grade`, `phone_number` vs `phone`
+  // Schema variation attempts to match whatever columns exist in the user's `admissions` table
   const attempts = [
-    // 1. Common naming with class and phone_number
+    // 1. Standard naming: class and phone_number
     {
       student_name: payload.student_name,
       father_name: payload.father_name,
@@ -143,7 +151,7 @@ export const saveAdmissionRecord = async (
       phone_number: payload.phone,
       address: payload.address,
     },
-    // 2. Common naming with grade and phone
+    // 2. Alternative naming: grade and phone
     {
       student_name: payload.student_name,
       father_name: payload.father_name,
@@ -151,7 +159,7 @@ export const saveAdmissionRecord = async (
       phone: payload.phone,
       address: payload.address,
     },
-    // 3. Mixed naming with class and phone
+    // 3. Alternative naming: class and phone
     {
       student_name: payload.student_name,
       father_name: payload.father_name,
@@ -159,7 +167,7 @@ export const saveAdmissionRecord = async (
       phone: payload.phone,
       address: payload.address,
     },
-    // 4. Mixed naming with grade and phone_number
+    // 4. Alternative naming: grade and phone_number
     {
       student_name: payload.student_name,
       father_name: payload.father_name,
@@ -167,7 +175,7 @@ export const saveAdmissionRecord = async (
       phone_number: payload.phone,
       address: payload.address,
     },
-    // 5. Title Case column names if created manually in table editor
+    // 5. Title Case column names if created manually
     {
       'Student Name': payload.student_name,
       'Father Name': payload.father_name,
@@ -181,24 +189,27 @@ export const saveAdmissionRecord = async (
 
   for (let i = 0; i < attempts.length; i++) {
     try {
-      const { data, error } = await client
+      // NOTE: We avoid .select() here so that anonymous visitors do not get blocked
+      // by RLS read restrictions if the table only has an INSERT policy!
+      const { error } = await client
         .from('admissions')
-        .insert([attempts[i]])
-        .select();
+        .insert([attempts[i]]);
 
       if (!error) {
         return {
           isSavedInSupabase: true,
           message: 'Saved in Supabase Successfully',
-          data,
         };
       }
 
       lastError = error;
-      // If error is NOT a column missing error, don't try other mappings, just break
-      const isColumnMissing = error.message?.toLowerCase().includes('column') || 
-                              error.message?.toLowerCase().includes('does not exist') ||
-                              error.code === '42703';
+
+      // If the error is not about a missing column, do not keep trying other mappings
+      const isColumnMissing =
+        error.message?.toLowerCase().includes('column') ||
+        error.message?.toLowerCase().includes('does not exist') ||
+        error.code === '42703';
+
       if (!isColumnMissing) {
         break;
       }
@@ -208,10 +219,18 @@ export const saveAdmissionRecord = async (
     }
   }
 
-  console.error('Supabase insert failed:', lastError);
+  console.error('Supabase admission insert error:', lastError);
+
+  let userFriendlyDetails = lastError?.message || 'Unable to save record in Supabase admissions table.';
+  if (lastError?.code === '42501' || userFriendlyDetails.toLowerCase().includes('row-level security')) {
+    userFriendlyDetails = 'Row Level Security policy blocked anonymous insert. Please run the RLS policy script in your Supabase SQL editor.';
+  } else if (lastError?.code === '42P01' || userFriendlyDetails.toLowerCase().includes('relation') || userFriendlyDetails.toLowerCase().includes('does not exist')) {
+    userFriendlyDetails = 'The "admissions" table does not exist in your Supabase database. Please create it in Supabase SQL editor.';
+  }
+
   return {
     isSavedInSupabase: false,
     message: 'Submission failed to save in Supabase',
-    details: lastError?.message || 'Error communicating with Supabase admissions table.',
+    details: userFriendlyDetails,
   };
 };
