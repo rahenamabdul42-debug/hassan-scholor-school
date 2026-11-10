@@ -12,6 +12,7 @@ import { NewsEventsSection } from './components/NewsEventsSection';
 import { ContactSection } from './components/ContactSection';
 import { FeeCalculatorModal } from './components/FeeCalculatorModal';
 import { Footer } from './components/Footer';
+import { SupabaseStatusBadge } from './components/SupabaseStatusBadge';
 import { SCHOOL_DETAILS } from './data/schoolData';
 
 export default function App() {
@@ -148,6 +149,9 @@ export default function App() {
           <span className="hidden sm:inline">Admissions WhatsApp</span>
         </a>
       </div>
+
+      {/* Floating Corner Button: Supabase Live Connection Indicator & Manager */}
+      <SupabaseStatusBadge />
 
     </div>
   );

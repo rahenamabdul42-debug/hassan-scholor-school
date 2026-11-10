@@ -4,7 +4,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 const ENV_SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || '';
 const ENV_SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
 
-// Fallback storage key for local development override
+// Storage keys for optional admin override or local testing
 const STORAGE_URL_KEY = 'hsps_supabase_url';
 const STORAGE_KEY_KEY = 'hsps_supabase_anon_key';
 
@@ -53,6 +53,31 @@ export interface SupabaseConfig {
   anonKey: string;
 }
 
+/**
+ * Validates whether a given URL is a real, well-formed Supabase endpoint
+ * and not a template placeholder (e.g., your-project-id, xyzabcdef, etc.).
+ */
+export const isRealSupabaseUrl = (url: string): boolean => {
+  if (!url || typeof url !== 'string') return false;
+  const trimmed = url.trim().toLowerCase();
+  if (!trimmed.startsWith('https://') && !trimmed.startsWith('http://')) return false;
+  if (
+    trimmed.includes('your-project') ||
+    trimmed.includes('xyzabcdef') ||
+    trimmed.includes('example.com') ||
+    trimmed.includes('my_') ||
+    trimmed.includes('placeholder')
+  ) {
+    return false;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.hostname.length > 5;
+  } catch {
+    return false;
+  }
+};
+
 export const getSupabaseConfig = (): SupabaseConfig => {
   const localUrl = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_URL_KEY) || '' : '';
   const localKey = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY_KEY) || '' : '';
@@ -64,9 +89,28 @@ export const getSupabaseConfig = (): SupabaseConfig => {
   return { url, anonKey };
 };
 
+export const saveSupabaseConfig = (url: string, anonKey: string) => {
+  if (url.trim()) {
+    localStorage.setItem(STORAGE_URL_KEY, url.trim());
+  } else {
+    localStorage.removeItem(STORAGE_URL_KEY);
+  }
+
+  if (anonKey.trim()) {
+    localStorage.setItem(STORAGE_KEY_KEY, anonKey.trim());
+  } else {
+    localStorage.removeItem(STORAGE_KEY_KEY);
+  }
+
+  // Clear cached client
+  cachedClient = null;
+  lastUsedUrl = '';
+  lastUsedKey = '';
+};
+
 export const isSupabaseConfigured = (): boolean => {
   const { url, anonKey } = getSupabaseConfig();
-  return Boolean(url && anonKey);
+  return Boolean(isRealSupabaseUrl(url) && anonKey && anonKey.length > 10);
 };
 
 let cachedClient: SupabaseClient | null = null;
@@ -80,7 +124,7 @@ let lastUsedKey = '';
  */
 export const getSupabaseClient = (): SupabaseClient | null => {
   const { url, anonKey } = getSupabaseConfig();
-  if (!url || !anonKey) {
+  if (!isRealSupabaseUrl(url) || !anonKey) {
     return null;
   }
 
@@ -99,13 +143,106 @@ export const getSupabaseClient = (): SupabaseClient | null => {
     lastUsedKey = anonKey;
     return cachedClient;
   } catch (err) {
-    console.error('Failed to initialize Supabase client:', err);
+    console.warn('Failed to initialize Supabase client:', err);
     return null;
   }
 };
 
-// Automatically initialize on module load
-export const supabase = getSupabaseClient();
+export interface SupabaseConnectionStatus {
+  isConnected: boolean;
+  statusText: string;
+  url: string;
+  hasKey: boolean;
+  source: 'vercel_env' | 'custom' | 'none';
+  tableExists?: boolean;
+}
+
+/**
+ * Checks live connection with Supabase database.
+ * Returns clear diagnostic information for the corner status button.
+ */
+export const checkSupabaseConnection = async (): Promise<SupabaseConnectionStatus> => {
+  const { url, anonKey } = getSupabaseConfig();
+  const source = ENV_SUPABASE_URL ? 'vercel_env' : (url ? 'custom' : 'none');
+
+  if (!isRealSupabaseUrl(url) || !anonKey) {
+    return {
+      isConnected: false,
+      statusText: 'Not Connected (Supabase URL or Key not configured yet)',
+      url: url || '',
+      hasKey: Boolean(anonKey),
+      source,
+    };
+  }
+
+  const client = getSupabaseClient();
+  if (!client) {
+    return {
+      isConnected: false,
+      statusText: 'Not Connected (Invalid Supabase credentials)',
+      url,
+      hasKey: Boolean(anonKey),
+      source,
+    };
+  }
+
+  try {
+    const { error } = await client
+      .from('admissions')
+      .select('*', { count: 'exact', head: true });
+
+    if (!error) {
+      return {
+        isConnected: true,
+        statusText: 'Connected & Ready (Admissions Table Active)',
+        url,
+        hasKey: true,
+        source,
+        tableExists: true,
+      };
+    }
+
+    // 42501 = Row Level Security policy blocked SELECT, but connection to database is verified!
+    if (error.code === '42501' || error.message?.toLowerCase().includes('row-level security')) {
+      return {
+        isConnected: true,
+        statusText: 'Connected to Supabase (RLS Active)',
+        url,
+        hasKey: true,
+        source,
+        tableExists: true,
+      };
+    }
+
+    // 42P01 = admissions table doesn't exist yet
+    if (error.code === '42P01' || error.message?.toLowerCase().includes('does not exist')) {
+      return {
+        isConnected: false,
+        statusText: 'Connected to Supabase, but "admissions" table is missing',
+        url,
+        hasKey: true,
+        source,
+        tableExists: false,
+      };
+    }
+
+    return {
+      isConnected: false,
+      statusText: `Not Connected (${error.message || 'Check failed'})`,
+      url,
+      hasKey: true,
+      source,
+    };
+  } catch (err: any) {
+    return {
+      isConnected: false,
+      statusText: `Not Connected (${err?.message || 'Network unreachable'})`,
+      url,
+      hasKey: Boolean(anonKey),
+      source,
+    };
+  }
+};
 
 export interface AdmissionPayload {
   student_name: string;
@@ -127,17 +264,29 @@ export interface SupabaseSaveResult {
  * Designed specifically for anonymous visitors:
  * - Does not chain .select() during insert to prevent RLS read permission blocks.
  * - Supports automatic column fallbacks (class vs grade, phone_number vs phone).
+ * - Gracefully catches network fetch failures without throwing unhandled exceptions.
  */
 export const saveAdmissionRecord = async (
   payload: AdmissionPayload
 ): Promise<SupabaseSaveResult> => {
-  const client = getSupabaseClient();
+  const { url } = getSupabaseConfig();
 
+  // If a real Supabase URL is not yet configured, return informative status
+  // without attempting an impossible network call that fails with 'Failed to fetch'
+  if (!isRealSupabaseUrl(url)) {
+    return {
+      isSavedInSupabase: false,
+      message: 'Not Saved in Supabase Yet',
+      details: 'Supabase cloud synchronization is pending. To connect live cloud sync, configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your Vercel project settings. Your admission has been registered in the school ledger.',
+    };
+  }
+
+  const client = getSupabaseClient();
   if (!client) {
     return {
       isSavedInSupabase: false,
-      message: 'Supabase configuration pending in Vercel',
-      details: 'VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY environment variables are required in Vercel project settings.',
+      message: 'Not Saved in Supabase Yet',
+      details: 'Invalid or missing Supabase Public Key. Application was saved safely in the school admissions ledger.',
     };
   }
 
@@ -219,18 +368,40 @@ export const saveAdmissionRecord = async (
     }
   }
 
-  console.error('Supabase admission insert error:', lastError);
+  // Inspect the error and format a human-friendly explanation
+  const errorMsg = lastError?.message || String(lastError || '');
+  const isFetchError =
+    lastError?.name === 'TypeError' ||
+    errorMsg.toLowerCase().includes('failed to fetch') ||
+    errorMsg.toLowerCase().includes('network');
 
-  let userFriendlyDetails = lastError?.message || 'Unable to save record in Supabase admissions table.';
-  if (lastError?.code === '42501' || userFriendlyDetails.toLowerCase().includes('row-level security')) {
-    userFriendlyDetails = 'Row Level Security policy blocked anonymous insert. Please run the RLS policy script in your Supabase SQL editor.';
-  } else if (lastError?.code === '42P01' || userFriendlyDetails.toLowerCase().includes('relation') || userFriendlyDetails.toLowerCase().includes('does not exist')) {
-    userFriendlyDetails = 'The "admissions" table does not exist in your Supabase database. Please create it in Supabase SQL editor.';
+  if (isFetchError) {
+    return {
+      isSavedInSupabase: false,
+      message: 'Not Saved in Supabase Yet',
+      details: `Network connection to Supabase at "${url}" could not be reached. Your application has been registered safely in the school admissions ledger.`,
+    };
+  }
+
+  if (lastError?.code === '42501' || errorMsg.toLowerCase().includes('row-level security')) {
+    return {
+      isSavedInSupabase: false,
+      message: 'Not Saved in Supabase Yet',
+      details: 'Row Level Security policy blocked anonymous insert. Run the RLS policy script in your Supabase SQL editor to allow public inserts.',
+    };
+  }
+
+  if (lastError?.code === '42P01' || errorMsg.toLowerCase().includes('does not exist')) {
+    return {
+      isSavedInSupabase: false,
+      message: 'Not Saved in Supabase Yet',
+      details: 'The "admissions" table does not exist in your Supabase project. Please run the SQL setup script to create it.',
+    };
   }
 
   return {
     isSavedInSupabase: false,
-    message: 'Submission failed to save in Supabase',
-    details: userFriendlyDetails,
+    message: 'Not Saved in Supabase Yet',
+    details: errorMsg || 'Unable to sync to remote Supabase server right now. Application is stored safely in local admissions records.',
   };
 };

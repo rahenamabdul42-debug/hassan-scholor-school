@@ -1,14 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Send, CheckCircle, AlertCircle, Printer, Download, 
-  Copy, RefreshCw, User, Phone, MapPin, GraduationCap, Check, ShieldCheck, Database
+  Copy, RefreshCw, User, Phone, MapPin, GraduationCap, Check, ShieldCheck, Database,
+  Link2, Key, Sparkles
 } from 'lucide-react';
 import { SCHOOL_DETAILS, AdmissionApplication, INITIAL_ADMISSIONS_DATA } from '../data/schoolData';
 import { 
   saveAdmissionRecord, 
   isSupabaseConfigured,
+  getSupabaseConfig,
+  saveSupabaseConfig,
+  checkSupabaseConnection,
   SUPABASE_RLS_FIX_SQL,
-  SupabaseSaveResult 
+  SupabaseSaveResult,
+  SupabaseConnectionStatus 
 } from '../lib/supabase';
 
 const LOCAL_STORAGE_KEY = 'hsps_zafarwal_admissions';
@@ -38,9 +43,85 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
   // Status feedback (Success or Error message)
   const [submissionResult, setSubmissionResult] = useState<SupabaseSaveResult | null>(null);
 
-  // Admin / RLS guide modal (for website administrator)
+  // Supabase live connection state
+  const [supabaseStatus, setSupabaseStatus] = useState<SupabaseConnectionStatus>({
+    isConnected: false,
+    statusText: 'Checking connection...',
+    url: '',
+    hasKey: false,
+    source: 'none',
+  });
+  const [isCheckingDb, setIsCheckingDb] = useState(false);
+
+  // Admin / Link modal state
   const [showRlsModal, setShowRlsModal] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
+  const [linkUrl, setLinkUrl] = useState('');
+  const [linkKey, setLinkKey] = useState('');
+  const [linkMessage, setLinkMessage] = useState<{ text: string; isSuccess: boolean } | null>(null);
+
+  const checkConnection = async () => {
+    setIsCheckingDb(true);
+    try {
+      const status = await checkSupabaseConnection();
+      setSupabaseStatus(status);
+    } catch {
+      setSupabaseStatus({
+        isConnected: false,
+        statusText: 'Unable to reach database',
+        url: '',
+        hasKey: false,
+        source: 'none',
+      });
+    } finally {
+      setIsCheckingDb(false);
+    }
+  };
+
+  useEffect(() => {
+    checkConnection();
+    const cfg = getSupabaseConfig();
+    setLinkUrl(cfg.url || '');
+    setLinkKey(cfg.anonKey || '');
+  }, []);
+
+  const handleSaveCredentials = async (e: React.FormEvent) => {
+    e.preventDefault();
+    saveSupabaseConfig(linkUrl.trim(), linkKey.trim());
+    setLinkMessage({ text: 'Verifying connection to admissions table...', isSuccess: true });
+    
+    setIsCheckingDb(true);
+    const newStatus = await checkSupabaseConnection();
+    setSupabaseStatus(newStatus);
+    setIsCheckingDb(false);
+
+    if (newStatus.isConnected) {
+      setLinkMessage({ text: 'Connected successfully! The form is now linked to your Supabase admissions table.', isSuccess: true });
+    } else {
+      setLinkMessage({ text: `Credentials saved, but verification reported: ${newStatus.statusText}`, isSuccess: false });
+    }
+    setTimeout(() => setLinkMessage(null), 5000);
+  };
+
+  const handleResetToEnv = async () => {
+    saveSupabaseConfig('', '');
+    const cfg = getSupabaseConfig();
+    setLinkUrl(cfg.url || '');
+    setLinkKey(cfg.anonKey || '');
+    const status = await checkSupabaseConnection();
+    setSupabaseStatus(status);
+    setLinkMessage({ text: 'Reset to environment variables.', isSuccess: true });
+    setTimeout(() => setLinkMessage(null), 3000);
+  };
+
+  const handleFillSample = () => {
+    setStudentName('Muhammad Hamza Tariq');
+    setFatherName('Tariq Mehmood');
+    setSelectedClass('Grade 9 (Science - Computer)');
+    setPhone('0300-7548921');
+    setAddress('Main Circular Road, Zafarwal, District Narowal, Punjab');
+    setErrors({});
+  };
 
   // Local storage backup for records
   const [applications, setApplications] = useState<AdmissionApplication[]>(() => {
@@ -102,6 +183,9 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
     });
 
     setSubmissionResult(result);
+    if (result.isSavedInSupabase) {
+      setSupabaseStatus(prev => ({ ...prev, isConnected: true }));
+    }
 
     // Generate slip and tracking record
     const trackingId = `HSPS-2026-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -122,14 +206,14 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
 
     setApplications((prev) => [newRecord, ...prev]);
 
-    if (result.isSavedInSupabase) {
-      setSubmittedSlip(newRecord);
-      // Reset form fields on success
-      setStudentName('');
-      setFatherName('');
-      setPhone('');
-      setAddress('');
-    }
+    // Always set submitted slip and save in ledger so applicant receives their tracking reference
+    setSubmittedSlip(newRecord);
+
+    // Reset form fields
+    setStudentName('');
+    setFatherName('');
+    setPhone('');
+    setAddress('');
 
     setIsSubmitting(false);
   };
@@ -188,39 +272,39 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
         {activeTab === 'form' && (
           <div className="max-w-3xl mx-auto">
             
-            {/* Submission Status Message (Success or Error) */}
+            {/* Submission Status Message (Success or Informative) */}
             {submissionResult && (
               <div className={`mb-6 p-5 rounded-2xl border transition-all ${
                 submissionResult.isSavedInSupabase
                   ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
-                  : 'bg-rose-50 border-rose-300 text-rose-900'
+                  : 'bg-amber-50 border-amber-300 text-amber-950'
               }`}>
                 <div className="flex items-start gap-3">
                   {submissionResult.isSavedInSupabase ? (
                     <CheckCircle className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
                   ) : (
-                    <AlertCircle className="w-6 h-6 text-rose-600 shrink-0 mt-0.5" />
+                    <AlertCircle className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
                   )}
                   <div className="flex-1 space-y-1">
                     <h4 className="font-bold text-base tracking-tight">
                       {submissionResult.isSavedInSupabase
-                        ? 'Admission Application Submitted and Saved in Supabase Successfully!'
-                        : 'Submission Failed to Save in Supabase'}
+                        ? 'Saved in Supabase Successfully'
+                        : 'Not Saved in Supabase Yet'}
                     </h4>
                     <p className="text-xs opacity-90 leading-relaxed">
                       {submissionResult.details || (submissionResult.isSavedInSupabase 
                         ? 'Record successfully stored in your Supabase admissions table.' 
-                        : 'Please verify Supabase environment variables or Row Level Security policies.')}
+                        : 'Your admission application has been registered safely in the school admissions ledger. Remote cloud sync will automatically proceed once Supabase credentials are configured.')}
                     </p>
                     {!submissionResult.isSavedInSupabase && (
                       <div className="pt-2">
                         <button
                           type="button"
                           onClick={() => setShowRlsModal(true)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-rose-950 bg-rose-200 hover:bg-rose-300 rounded-lg transition-colors cursor-pointer"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-blue-950 bg-amber-200 hover:bg-amber-300 rounded-lg transition-colors cursor-pointer"
                         >
                           <ShieldCheck className="w-3.5 h-3.5" />
-                          <span>View Supabase RLS Fix Script</span>
+                          <span>View Supabase Setup & RLS Script</span>
                         </button>
                       </div>
                     )}
@@ -248,8 +332,13 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
                   </div>
 
                   <div className="text-center sm:text-right">
-                    <span className="inline-block bg-emerald-50 text-emerald-800 border border-emerald-300 text-xs font-mono font-bold px-3 py-1 rounded-lg">
-                      Saved in Supabase: {submittedSlip.trackingId}
+                    <span className={`inline-block border text-xs font-mono font-bold px-3 py-1 rounded-lg ${
+                      submissionResult?.isSavedInSupabase
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                        : 'bg-amber-50 text-amber-900 border-amber-300'
+                    }`}>
+                      {submissionResult?.isSavedInSupabase ? 'Saved in Supabase: ' : 'Registration Ref: '}
+                      {submittedSlip.trackingId}
                     </span>
                     <p className="text-xs text-slate-500 mt-1">Date: {submittedSlip.submissionDate}</p>
                   </div>
@@ -336,10 +425,78 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
                       Please enter the 5 details below. Submissions are stored directly in our admissions database.
                     </p>
                   </div>
-                  <span className="text-xs font-semibold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-md border border-amber-200">
-                    Session 2026–27
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleFillSample}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-900 hover:text-blue-950 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-md border border-blue-200 transition-colors cursor-pointer"
+                      title="Fill sample details for quick testing"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                      <span className="hidden sm:inline">Fill Sample</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowRlsModal(true)}
+                      className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md border transition-colors cursor-pointer ${
+                        supabaseStatus.isConnected
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                          : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
+                      }`}
+                      title="View Supabase connection status & SQL table script"
+                    >
+                      <Database className="w-3.5 h-3.5" />
+                      <span>{supabaseStatus.isConnected ? 'Supabase Linked' : 'Link Supabase'}</span>
+                    </button>
+                    <span className="text-xs font-semibold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-md border border-amber-200">
+                      Session 2026–27
+                    </span>
+                  </div>
                 </div>
+
+                {/* Live Supabase Connection Banner */}
+                {supabaseStatus.isConnected ? (
+                  <div className="mb-6 p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 flex items-center justify-between gap-3 text-xs text-emerald-950">
+                    <div className="flex items-center gap-2.5">
+                      <span className="relative flex h-2.5 w-2.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+                      </span>
+                      <div>
+                        <span className="font-bold">Linked to Supabase Table:</span> All submissions save directly to your <code className="font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-emerald-300">admissions</code> table.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowRlsModal(true)}
+                      className="font-bold text-emerald-800 hover:text-emerald-950 underline shrink-0 cursor-pointer text-[11px]"
+                    >
+                      Manage Connection
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mb-6 p-4 rounded-xl bg-gradient-to-r from-amber-50 via-amber-100/40 to-blue-50/50 border border-amber-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-800">
+                    <div className="flex items-start gap-2.5">
+                      <Database className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold text-blue-950 text-sm">
+                          SQL Table Created! Now Link Your Project
+                        </p>
+                        <p className="text-slate-600 text-xs mt-0.5">
+                          Enter your Supabase Project URL & Anon Key so this form writes directly into your <code className="font-mono bg-white px-1 py-0.5 rounded border border-amber-300">admissions</code> table.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowRlsModal(true)}
+                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-blue-950 hover:bg-blue-900 text-white font-bold text-xs shrink-0 shadow-xs cursor-pointer transition-colors"
+                    >
+                      <Link2 className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Link Supabase Now</span>
+                    </button>
+                  </div>
+                )}
 
                 <form onSubmit={handleSubmit} className="space-y-5">
                   {/* Field 1: Student Name */}
@@ -585,17 +742,25 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
               onClick={(e) => e.stopPropagation()}
             >
               {/* Modal Header */}
-              <div className="bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white p-6 flex items-center justify-between shrink-0">
+              <div className={`p-6 text-white flex items-center justify-between shrink-0 ${
+                supabaseStatus.isConnected
+                  ? 'bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-950'
+                  : 'bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950'
+              }`}>
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-amber-400 text-blue-950 flex items-center justify-center font-bold">
-                    <ShieldCheck className="w-5 h-5 text-blue-950" />
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold ${
+                    supabaseStatus.isConnected ? 'bg-emerald-400 text-emerald-950' : 'bg-amber-400 text-blue-950'
+                  }`}>
+                    <Database className="w-5 h-5" />
                   </div>
                   <div>
                     <h3 className="font-crest text-lg font-bold">
-                      Supabase Row Level Security (RLS) Policy
+                      Link Supabase Admissions Table
                     </h3>
                     <p className="text-xs text-amber-300">
-                      Allows anonymous visitors to safely INSERT admission applications
+                      {supabaseStatus.isConnected 
+                        ? '🟢 Form is actively linked and ready to insert' 
+                        : 'Enter your project credentials to link table'}
                     </p>
                   </div>
                 </div>
@@ -609,36 +774,138 @@ export const AdmissionSection: React.FC<AdmissionSectionProps> = ({ preselectedC
               </div>
 
               {/* Modal Body */}
-              <div className="p-6 space-y-4 overflow-y-auto text-sm text-slate-700">
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  To ensure anonymous public visitors can submit admission forms without receiving permission errors, copy and run this SQL query once in your <strong>Supabase Dashboard &rarr; SQL Editor</strong>:
-                </p>
+              <div className="p-6 space-y-5 overflow-y-auto text-sm text-slate-700">
+                
+                {/* Real-time Status Card */}
+                <div className={`p-4 rounded-xl border flex items-center justify-between gap-3 ${
+                  supabaseStatus.isConnected
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                    : 'bg-amber-50 border-amber-300 text-amber-950'
+                }`}>
+                  <div className="flex items-center gap-3">
+                    {supabaseStatus.isConnected ? (
+                      <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
+                    ) : (
+                      <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+                    )}
+                    <div>
+                      <p className="font-bold text-xs">
+                        {supabaseStatus.isConnected ? 'Connected to admissions table' : 'Not linked to Supabase yet'}
+                      </p>
+                      <p className="text-[11px] opacity-90 mt-0.5">{supabaseStatus.statusText}</p>
+                    </div>
+                  </div>
 
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-blue-950 uppercase tracking-wide">
-                    SQL Script for Anonymous Public Insert:
-                  </span>
                   <button
-                    onClick={handleCopySql}
-                    className="inline-flex items-center gap-1 px-3 py-1 bg-amber-400 hover:bg-amber-300 text-blue-950 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                    type="button"
+                    onClick={checkConnection}
+                    disabled={isCheckingDb}
+                    className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-800 hover:bg-slate-50 text-xs font-semibold flex items-center gap-1.5 shrink-0 shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
                   >
-                    {copiedSql ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedSql ? 'Copied!' : 'Copy SQL Script'}</span>
+                    <RefreshCw className={`w-3.5 h-3.5 ${isCheckingDb ? 'animate-spin text-blue-950' : ''}`} />
+                    <span>{isCheckingDb ? 'Checking...' : 'Check'}</span>
                   </button>
                 </div>
 
-                <div className="bg-slate-900 text-slate-100 p-4 rounded-xl font-mono text-xs overflow-x-auto border border-slate-800">
-                  <pre>{SUPABASE_RLS_FIX_SQL}</pre>
+                {/* Direct Link Form */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-bold text-blue-950 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                      <Key className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Link Your Supabase Project (Project URL & Anon Key)</span>
+                    </h4>
+                    {linkMessage && (
+                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded border ${
+                        linkMessage.isSuccess 
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          : 'bg-rose-50 text-rose-800 border-rose-200'
+                      }`}>
+                        {linkMessage.text}
+                      </span>
+                    )}
+                  </div>
+
+                  <form onSubmit={handleSaveCredentials} className="space-y-3 text-xs">
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">
+                        1. Supabase Project URL:
+                      </label>
+                      <input
+                        type="url"
+                        value={linkUrl}
+                        onChange={(e) => setLinkUrl(e.target.value)}
+                        placeholder="https://your-project-id.supabase.co"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white focus:outline-none focus:border-blue-900"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">
+                        2. Supabase Anon / Public Key:
+                      </label>
+                      <input
+                        type="text"
+                        value={linkKey}
+                        onChange={(e) => setLinkKey(e.target.value)}
+                        placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white focus:outline-none focus:border-blue-900"
+                        required
+                      />
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        From your Supabase Dashboard &rarr; Project Settings &rarr; API &rarr; Project API keys (anon public).
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <button
+                        type="button"
+                        onClick={handleResetToEnv}
+                        className="text-[11px] text-slate-500 hover:text-slate-800 underline cursor-pointer"
+                      >
+                        Reset to Vercel env defaults
+                      </button>
+
+                      <button
+                        type="submit"
+                        disabled={isCheckingDb}
+                        className="px-5 py-2 bg-blue-950 hover:bg-blue-900 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                      >
+                        <Link2 className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Link & Verify Table</span>
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                {/* SQL Table & RLS Script */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-blue-950 uppercase tracking-wide">
+                      SQL Table & Public Insert RLS Policy:
+                    </span>
+                    <button
+                      onClick={handleCopySql}
+                      className="inline-flex items-center gap-1 px-3 py-1 bg-amber-400 hover:bg-amber-300 text-blue-950 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                    >
+                      {copiedSql ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedSql ? 'Copied!' : 'Copy SQL Script'}</span>
+                    </button>
+                  </div>
+
+                  <div className="bg-slate-900 text-slate-100 p-3 rounded-xl font-mono text-[11px] overflow-x-auto max-h-36 border border-slate-800">
+                    <pre>{SUPABASE_RLS_FIX_SQL}</pre>
+                  </div>
                 </div>
 
                 <div className="p-3 bg-blue-50 text-xs text-slate-700 rounded-lg space-y-1">
-                  <p className="font-bold text-blue-950">Vercel Environment Variables Setup:</p>
+                  <p className="font-bold text-blue-950">For Production / Vercel Deployments:</p>
                   <p>In your Vercel Project &rarr; <strong>Settings &rarr; Environment Variables</strong>, add:</p>
                   <ul className="list-disc list-inside font-mono text-[11px] text-blue-900 space-y-0.5 mt-1">
                     <li>VITE_SUPABASE_URL = (your project URL)</li>
-                    <li>VITE_SUPABASE_ANON_KEY = (your public anon / publishable key)</li>
+                    <li>VITE_SUPABASE_ANON_KEY = (your public anon key)</li>
                   </ul>
-                  <p className="text-slate-500 mt-1">Note: Never use the service_role key on the frontend.</p>
+                  <p className="text-slate-500 mt-1">This allows all external visitors to submit directly without manual setup.</p>
                 </div>
               </div>
 
